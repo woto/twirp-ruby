@@ -1,6 +1,8 @@
 syntax = "proto3";
 package example.hello_world;
 
+option ruby_package = "testpackage";
+
 service HelloWorld {
     rpc Hello(HelloRequest) returns (HelloResponse);
 }
