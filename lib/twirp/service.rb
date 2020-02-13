@@ -14,16 +14,14 @@
 require_relative 'encoding'
 require_relative 'error'
 require_relative 'service_dsl'
+require 'active_support'
 
 module Twirp
-
   class Service
-
     # DSL to define a service with package, service and rpcs.
     extend ServiceDSL
 
     class << self
-
       # Whether to raise exceptions instead of handling them with exception_raised hooks.
       # Useful during tests to easily debug and catch unexpected exceptions.
       attr_accessor :raise_exceptions # Default: false
@@ -31,11 +29,10 @@ module Twirp
       # Rack response with a Twirp::Error
       def error_response(twerr)
         status = Twirp::ERROR_CODES_TO_HTTP_STATUS[twerr.code]
-        headers = {'Content-Type' => Encoding::JSON} # Twirp errors are always JSON, even if the request was protobuf
+        headers = { 'Content-Type' => Encoding::JSON } # Twirp errors are always JSON, even if the request was protobuf
         resp_body = Encoding.encode_json(twerr.to_h)
         [status, headers, [resp_body]]
       end
-
     end
 
     def initialize(handler)
@@ -48,42 +45,71 @@ module Twirp
     end
 
     # Setup hook blocks.
-    def before(&block) @before << block; end
-    def on_success(&block) @on_success << block; end
-    def on_error(&block) @on_error << block; end
-    def exception_raised(&block) @exception_raised << block; end
+    def before(&block)
+      @before << block
+    end
+
+    def on_success(&block)
+      @on_success << block
+    end
+
+    def on_error(&block)
+      @on_error << block
+    end
+
+    def exception_raised(&block)
+      @exception_raised << block
+    end
 
     # Service full_name is needed to route http requests to this service.
-    def full_name; @full_name ||= self.class.service_full_name; end
-    def name; @name ||= self.class.service_name; end
+    def full_name
+      @full_name ||= self.class.service_full_name
+    end
+
+    def name
+      @name ||= self.class.service_name
+    end
 
     # Rack app handler.
     def call(rack_env)
-      begin
-        env = {}
-        bad_route = route_request(rack_env, env)
-        return error_response(bad_route, env) if bad_route
+      env = {}
+      result = nil
+      catch do |return_error|
+        payload = { rack_env: rack_env, env: env }
+        ActiveSupport::Notifications.instrument 'route_request.twirp', payload do
+          result = route_request(rack_env, env)
+        end
+        throw(return_error) if result.is_a? Twirp::Error
 
         @before.each do |hook|
-          result = hook.call(rack_env, env)
-          return error_response(result, env) if result.is_a? Twirp::Error
+          ActiveSupport::Notifications.instrument 'before.twirp', payload.merge(hook: hook) do
+            result = hook.call(rack_env, env)
+          end
+          throw(return_error) if result.is_a? Twirp::Error
         end
 
-        output = call_handler(env)
-        return error_response(output, env) if output.is_a? Twirp::Error
-        return success_response(output, env)
-
-      rescue => e
-        raise e if self.class.raise_exceptions
-        begin
-          @exception_raised.each{|hook| hook.call(e, env) }
-        rescue => hook_e
-          e = hook_e
+        ActiveSupport::Notifications.instrument 'handler.twirp', payload do
+          result = call_handler(env)
         end
-
-        twerr = Twirp::Error.internal_with(e)
-        return error_response(twerr, env)
+        throw(return_error) if result.is_a? Twirp::Error
       end
+
+      if result.is_a? Twirp::Error
+        error_response(result, env)
+      else
+        success_response(result, env)
+      end
+    rescue StandardError => e
+      raise e if self.class.raise_exceptions
+
+      begin
+        @exception_raised.each { |hook| hook.call(e, env) }
+      rescue StandardError => e
+        e = e
+      end
+
+      twerr = Twirp::Error.internal_with(e)
+      error_response(twerr, env)
     end
 
     # Call the handler method with input attributes or protobuf object.
@@ -91,7 +117,7 @@ module Twirp
     # Hooks are not called and exceptions are raised instead of being wrapped.
     # This is useful for unit testing the handler. The env should include
     # fake data that is used by the handler, replicating middleware and before hooks.
-    def call_rpc(rpc_method, input={}, env={})
+    def call_rpc(rpc_method, input = {}, env = {})
       base_env = self.class.rpcs[rpc_method.to_s]
       return Twirp::Error.bad_route("Invalid rpc method #{rpc_method.to_s.inspect}") unless base_env
 
@@ -103,40 +129,42 @@ module Twirp
       call_handler(env)
     end
 
-
-  private
+    private
 
     # Parse request and fill env with rpc data.
     # Returns a bad_route error if something went wrong.
     def route_request(rack_env, env)
       rack_request = Rack::Request.new(rack_env)
 
-      if rack_request.request_method != "POST"
-        return bad_route_error("HTTP request method must be POST", rack_request)
+      if rack_request.request_method != 'POST'
+        return bad_route_error('HTTP request method must be POST', rack_request)
       end
 
-      content_type = rack_request.get_header("CONTENT_TYPE")
-      if !Encoding.valid_content_type?(content_type)
+      content_type = rack_request.get_header('CONTENT_TYPE')
+      unless Encoding.valid_content_type?(content_type)
         return bad_route_error("Unexpected Content-Type: #{content_type.inspect}. Content-Type header must be one of #{Encoding.valid_content_types.inspect}", rack_request)
       end
+
       env[:content_type] = content_type
 
-      path_parts = rack_request.fullpath.split("/")
-      if path_parts.size < 3 || path_parts[-2] != self.full_name
-        return bad_route_error("Invalid route. Expected format: POST {BaseURL}/#{self.full_name}/{Method}", rack_request)
+      path_parts = rack_request.fullpath.split('/')
+      if path_parts.size < 3 || path_parts[-2] != full_name
+        return bad_route_error("Invalid route. Expected format: POST {BaseURL}/#{full_name}/{Method}", rack_request)
       end
+
       method_name = path_parts[-1]
 
       base_env = self.class.rpcs[method_name]
-      if !base_env
+      unless base_env
         return bad_route_error("Invalid rpc method #{method_name.inspect}", rack_request)
       end
+
       env.merge!(base_env) # :rpc_method, :input_class, :output_class
 
       input = nil
       begin
         input = Encoding.decode(rack_request.body.read, env[:input_class], content_type)
-      rescue => e
+      rescue StandardError => e
         error_msg = "Invalid request body for rpc method #{method_name.inspect} with Content-Type=#{content_type}"
         if e.is_a?(Google::Protobuf::ParseError)
           error_msg += ": #{e.message.strip}"
@@ -146,19 +174,17 @@ module Twirp
 
       env[:input] = input
       env[:http_response_headers] = {}
-      return
+      nil
     end
 
     def bad_route_error(msg, req)
       Twirp::Error.bad_route msg, twirp_invalid_route: "#{req.request_method} #{req.fullpath}"
     end
 
-
-
     # Call handler method and return a Protobuf Message or a Twirp::Error.
     def call_handler(env)
       m = env[:ruby_method]
-      if !@handler.respond_to?(m)
+      unless @handler.respond_to?(m)
         return Twirp::Error.unimplemented("Handler method #{m} is not implemented.")
       end
 
@@ -174,40 +200,34 @@ module Twirp
     end
 
     def success_response(output, env)
-      begin
-        env[:output] = output
-        @on_success.each{|hook| hook.call(env) }
+      env[:output] = output
+      @on_success.each { |hook| hook.call(env) }
 
-        headers = env[:http_response_headers].merge('Content-Type' => env[:content_type])
-        resp_body = Encoding.encode(output, env[:output_class], env[:content_type])
-        [200, headers, [resp_body]]
-
-      rescue => e
-        return exception_response(e, env)
-      end
+      headers = env[:http_response_headers].merge('Content-Type' => env[:content_type])
+      resp_body = Encoding.encode(output, env[:output_class], env[:content_type])
+      [200, headers, [resp_body]]
+    rescue StandardError => e
+      exception_response(e, env)
     end
 
     def error_response(twerr, env)
-      begin
-        @on_error.each{|hook| hook.call(twerr, env) }
-        self.class.error_response(twerr)
-      rescue => e
-        return exception_response(e, env)
-      end
+      @on_error.each { |hook| hook.call(twerr, env) }
+      self.class.error_response(twerr)
+    rescue StandardError => e
+      exception_response(e, env)
     end
 
     def exception_response(e, env)
       raise e if self.class.raise_exceptions
 
       begin
-        @exception_raised.each{|hook| hook.call(e, env) }
-      rescue => hook_e
-        e = hook_e
+        @exception_raised.each { |hook| hook.call(e, env) }
+      rescue StandardError => e
+        e = e
       end
 
       twerr = Twirp::Error.internal_with(e)
       self.class.error_response(twerr)
     end
-
   end
 end
