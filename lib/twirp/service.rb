@@ -14,6 +14,7 @@
 require_relative 'encoding'
 require_relative 'error'
 require_relative 'service_dsl'
+require 'active_support'
 
 module Twirp
 
@@ -60,19 +61,34 @@ module Twirp
     # Rack app handler.
     def call(rack_env)
       begin
-        env = {}
-        bad_route = route_request(rack_env, env)
-        return error_response(bad_route, env) if bad_route
 
-        @before.each do |hook|
-          result = hook.call(rack_env, env)
-          return error_response(result, env) if result.is_a? Twirp::Error
+        env = {}
+        result = nil
+        catch do |return_error|
+          payload = { rack_env: rack_env, env: env }
+          ActiveSupport::Notifications.instrument 'route_request.twirp', payload do
+            result = route_request(rack_env, env)
+          end
+          throw(return_error) if result.is_a? Twirp::Error
+
+          @before.each do |hook|
+            ActiveSupport::Notifications.instrument 'before.twirp', payload.merge(hook: hook) do
+              result = hook.call(rack_env, env)
+            end
+            throw(return_error) if result.is_a? Twirp::Error
+          end
+
+          ActiveSupport::Notifications.instrument 'handler.twirp', payload do
+            result = call_handler(env)
+          end
+          throw(return_error) if result.is_a? Twirp::Error
         end
 
-        output = call_handler(env)
-        return error_response(output, env) if output.is_a? Twirp::Error
-        return success_response(output, env)
-
+        if result.is_a? Twirp::Error
+          error_response(result, env)
+        else
+          success_response(result, env)
+        end
       rescue => e
         raise e if self.class.raise_exceptions
         begin
