@@ -120,12 +120,14 @@ module Twirp
 
   private
 
-    def instrument(event_name, payload)
-      if defined?(ActiveSupport::Notifications)
+    if defined?(ActiveSupport::Notifications)
+      def instrument(event_name, payload)
         ActiveSupport::Notifications.instrument event_name, payload do
           yield
         end
-      else
+      end
+    else
+      def instrument(_event_name, _payload)
         yield
       end
     end
@@ -200,7 +202,11 @@ module Twirp
     def success_response(output, env)
       begin
         env[:output] = output
-        @on_success.each{|hook| hook.call(env) }
+        @on_success.each do |hook|
+          instrument 'before.twirp', env: env, hook: hook do
+            hook.call(env)
+          end
+        end
 
         headers = env[:http_response_headers].merge('Content-Type' => env[:content_type])
         resp_body = Encoding.encode(output, env[:output_class], env[:content_type])
@@ -213,7 +219,11 @@ module Twirp
 
     def error_response(twerr, env)
       begin
-        @on_error.each{|hook| hook.call(twerr, env) }
+        @on_error.each do |hook|
+          instrument 'error.twirp', env: env, hook: hook, twerr: twerr do
+            hook.call(twerr, env)
+          end
+        end
         self.class.error_response(twerr)
       rescue => e
         return exception_response(e, env)
@@ -224,7 +234,11 @@ module Twirp
       raise e if self.class.raise_exceptions
 
       begin
-        @exception_raised.each{|hook| hook.call(e, env) }
+        @exception_raised.each do |hook|
+          instrument 'exception_raised.twirp', env: env, hook: hook do
+            hook.call(e, env)
+          end
+        end
       rescue => hook_e
         e = hook_e
       end
