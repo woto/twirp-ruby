@@ -62,31 +62,25 @@ module Twirp
       begin
         env = {}
         result = nil
-        catch do |return_error|
-          payload = { rack_env: rack_env, env: env }
-          instrument  'route_request.twirp', payload do
-            result = route_request(rack_env, env)
-          end
-          throw(return_error) if result.is_a? Twirp::Error
+        payload = { rack_env: rack_env, env: env }
+        instrument  'route_request.twirp', payload do
+          bad_route = route_request(rack_env, env)
+        end
+        return error_response(bad_route, env) if bad_route
 
-          @before.each do |hook|
-            instrument 'before.twirp', payload.merge(hook: hook) do
-              result = hook.call(rack_env, env)
-            end
-            throw(return_error) if result.is_a? Twirp::Error
+        @before.each do |hook|
+          instrument 'before.twirp', payload.merge(hook: hook) do
+            result = hook.call(rack_env, env)
+            return error_response(result, env) if result.is_a? Twirp::Error
           end
-
-          instrument 'handler.twirp', payload do
-            result = call_handler(env)
-          end
-          throw(return_error) if result.is_a? Twirp::Error
         end
 
-        if result.is_a? Twirp::Error
-          error_response(result, env)
-        else
-          success_response(result, env)
+        instrument 'handler.twirp', payload do
+          output = call_handler(env)
         end
+        return error_response(output, env) if output.is_a? Twirp::Error
+        return success_response(output, env)
+
       rescue => e
         raise e if self.class.raise_exceptions
         begin
