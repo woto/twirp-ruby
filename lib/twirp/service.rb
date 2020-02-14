@@ -14,7 +14,6 @@
 require_relative 'encoding'
 require_relative 'error'
 require_relative 'service_dsl'
-require 'active_support'
 
 module Twirp
 
@@ -61,24 +60,23 @@ module Twirp
     # Rack app handler.
     def call(rack_env)
       begin
-
         env = {}
         result = nil
         catch do |return_error|
           payload = { rack_env: rack_env, env: env }
-          ActiveSupport::Notifications.instrument 'route_request.twirp', payload do
+          instrument  'route_request.twirp', payload do
             result = route_request(rack_env, env)
           end
           throw(return_error) if result.is_a? Twirp::Error
 
           @before.each do |hook|
-            ActiveSupport::Notifications.instrument 'before.twirp', payload.merge(hook: hook) do
+            instrument 'before.twirp', payload.merge(hook: hook) do
               result = hook.call(rack_env, env)
             end
             throw(return_error) if result.is_a? Twirp::Error
           end
 
-          ActiveSupport::Notifications.instrument 'handler.twirp', payload do
+          instrument 'handler.twirp', payload do
             result = call_handler(env)
           end
           throw(return_error) if result.is_a? Twirp::Error
@@ -121,6 +119,16 @@ module Twirp
 
 
   private
+
+    def instrument(event_name, payload)
+      if defined?(ActiveSupport::Notifications)
+        ActiveSupport::Notifications.instrument event_name, payload do
+          yield
+        end
+      else
+        yield
+      end
+    end
 
     # Parse request and fill env with rpc data.
     # Returns a bad_route error if something went wrong.
