@@ -64,22 +64,23 @@ module Twirp
         result = nil
         payload = { rack_env: rack_env, env: env }
         instrument  'route_request.twirp', payload do
-          bad_route = route_request(rack_env, env)
+          result = route_request(rack_env, env)
         end
-        return error_response(bad_route, env) if bad_route
+        return error_response(result, env) if result
 
         @before.each do |hook|
           instrument 'before.twirp', payload.merge(hook: hook) do
             result = hook.call(rack_env, env)
-            return error_response(result, env) if result.is_a? Twirp::Error
+            next
           end
+          return error_response(result, env) if result.is_a? Twirp::Error
         end
 
         instrument 'handler.twirp', payload do
-          output = call_handler(env)
+          result = call_handler(env)
         end
-        return error_response(output, env) if output.is_a? Twirp::Error
-        return success_response(output, env)
+        return error_response(result, env) if result.is_a? Twirp::Error
+        return success_response(result, env)
 
       rescue => e
         raise e if self.class.raise_exceptions
