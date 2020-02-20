@@ -60,6 +60,10 @@ end
 
 # Mount on webserver
 path_prefix = "/twirp/" + service.full_name
-server = WEBrick::HTTPServer.new(Port: 8080)
+server = WEBrick::HTTPServer.new(
+  Port: 8080,
+  Logger: WEBrick::Log.new("/dev/null"),
+  AccessLog: [],
+)
 server.mount path_prefix, Rack::Handler::WEBrick, service
 server.start

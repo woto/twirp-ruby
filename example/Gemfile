@@ -5,3 +5,4 @@ gem "twirp", path: "../"
 gem 'activesupport'
 gem 'byebug'
 gem 'awesome_print'
+gem 'webrick'

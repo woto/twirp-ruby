@@ -28,6 +28,7 @@ GEM
     thread_safe (0.3.6)
     tzinfo (1.2.6)
       thread_safe (~> 0.1)
+    webrick (1.6.0)
     zeitwerk (2.2.2)
 
 PLATFORMS
@@ -39,6 +40,7 @@ DEPENDENCIES
   byebug
   rack
   twirp!
+  webrick
 
 BUNDLED WITH
    1.17.2
