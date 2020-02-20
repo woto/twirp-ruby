@@ -2,3 +2,6 @@ source "https://rubygems.org"
 
 gem "rack"
 gem "twirp", path: "../"
+gem 'activesupport'
+gem 'byebug'
+gem 'awesome_print'

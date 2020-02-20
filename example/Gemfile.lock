@@ -1,25 +1,44 @@
 PATH
   remote: ..
   specs:
-    twirp (1.1.0)
+    twirp (1.4.1)
       faraday (~> 0)
       google-protobuf (~> 3.0, >= 3.0.0)
 
 GEM
   remote: https://rubygems.org/
   specs:
-    faraday (0.14.0)
+    activesupport (6.0.2.1)
+      concurrent-ruby (~> 1.0, >= 1.0.2)
+      i18n (>= 0.7, < 2)
+      minitest (~> 5.1)
+      tzinfo (~> 1.1)
+      zeitwerk (~> 2.2)
+    awesome_print (1.8.0)
+    byebug (11.1.1)
+    concurrent-ruby (1.1.6)
+    faraday (0.17.3)
       multipart-post (>= 1.2, < 3)
-    google-protobuf (3.5.1.2)
-    multipart-post (2.0.0)
+    google-protobuf (3.11.4-x86_64-linux)
+    i18n (1.8.2)
+      concurrent-ruby (~> 1.0)
+    minitest (5.14.0)
+    multipart-post (2.1.1)
     rack (2.0.8)
+    thread_safe (0.3.6)
+    tzinfo (1.2.6)
+      thread_safe (~> 0.1)
+    zeitwerk (2.2.2)
 
 PLATFORMS
   ruby
 
 DEPENDENCIES
+  activesupport
+  awesome_print
+  byebug
   rack
   twirp!
 
 BUNDLED WITH
-   1.16.1
+   1.17.2
